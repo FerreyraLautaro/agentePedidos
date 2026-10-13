@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+const API_KEY_BY_PROVIDER = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+} as const;
+
 export const envSchema = z
   .object({
     PORT: z.coerce.number().int().default(3000),
@@ -13,13 +19,15 @@ export const envSchema = z
     REDIS_HOST: z.string().min(1),
     REDIS_PORT: z.coerce.number().int().default(6379),
 
-    LLM_PROVIDER: z.enum(['anthropic', 'openai']),
+    LLM_PROVIDER: z.enum(['anthropic', 'openai', 'gemini']),
+    ANTHROPIC_MODEL: z.string().default('claude-haiku-5-5'),
     ANTHROPIC_API_KEY: z.string().optional(),
     OPENAI_API_KEY: z.string().optional(),
+    GEMINI_MODEL: z.string().default('gemini-3.1-flash-lite'),
+    GEMINI_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
-    const key =
-      env.LLM_PROVIDER === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+    const key = API_KEY_BY_PROVIDER[env.LLM_PROVIDER];
     if (!env[key]) {
       ctx.addIssue({
         code: 'custom',

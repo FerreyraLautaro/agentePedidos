@@ -75,9 +75,9 @@ La versión mínima tiene que poder crecer hacia el plan completo sin reescribir
 **Investigar:** estructura modular de NestJS para un servicio con IA y configuración por entorno (`@nestjs/config`).
 
 - [X] Repo en GitHub con NestJS y TypeScript en modo `strict`
-- [ ] Docker Compose con PostgreSQL + pgvector y Redis
-- [ ] Variables de entorno para API keys del LLM, nunca hardcodeadas
-- [ ] Módulo `llm` con una interfaz `LlmProvider` (chat, tools, streaming) y una primera implementación
+- [X] Docker Compose con PostgreSQL + pgvector y Redis
+- [X] Variables de entorno para API keys del LLM, nunca hardcodeadas
+- [X] Módulo `llm` con una interfaz `LlmProvider` (chat, tools, streaming) y una primera implementación
 
 **Para la entrevista:** por qué abstraer el proveedor desde el día 1 (cambiar de modelo, fallback, tests con mocks).
 
