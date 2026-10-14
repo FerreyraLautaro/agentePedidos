@@ -18,4 +18,17 @@ export const products = pgTable(
     ],
 );
 
+export const stock = pgTable(
+  'stock',
+  {
+    productId: uuid('product_id')
+      .primaryKey()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    quantity: integer().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check('stock_quantity_non_negative', sql`${table.quantity} >= 0`)],
+);
+
+
 export type Product = typeof products.$inferSelect;
