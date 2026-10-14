@@ -8,8 +8,9 @@ import { DatabaseModule } from './database/database.module.js';
 import { ProductsService } from './products/products.service.js';
 import { ProductsController } from './products/products.controller.js';
 import { ProductsModule } from './products/products.module.js';
+import { StockModule } from './stock/stock.module.js';
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), LlmModule, DatabaseModule, ProductsModule ],
+  imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), LlmModule, DatabaseModule, ProductsModule, StockModule ],
   controllers: [AppController, ProductsController],
   providers: [AppService, ProductsService],
 })
