@@ -15,6 +15,13 @@
       "when": 1792009281461,
       "tag": "0001_lying_roulette",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792009970583,
+      "tag": "0002_closed_ultimatum",
+      "breakpoints": true
     }
   ]
 }
