@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-A NestJS lab project: an LLM-powered ordering agent, built phase by phase as preparation for a master's thesis and technical interviews. The roadmap lives in `Laboratorio agente de pedidos en NestJS (TFM + entrevista).md`. Work starts at "Fase 0" and proceeds in order; the checkboxes there are the source of truth for progress. Ignore the "versión mínima" day-by-day section of that file.
+A NestJS lab project: an LLM-powered ordering agent for a neighborhood grocery store, built phase by phase as the base of a master's thesis (TFM). The roadmap lives in `Laboratorio agente de pedidos en NestJS (TFM + entrevista).md`. Phases proceed in order; the checkboxes and the "Próximos pasos" list of the current phase are the source of truth for progress and the resume point between sessions.
 
 ## Working mode
 
@@ -20,10 +20,16 @@ npm run start:dev                     # Nest in watch mode (.env is read only at
 npx vitest run                        # unit tests (**/*.spec.ts)
 npx vitest run src/llm/adapters/gemini.llm.spec.ts   # single file
 npx vitest run -t "groups consecutive"               # single test by name
+npm run test:int                      # integration tests (**/*.int-spec.ts) against agente_pedidos_test; needs Docker
 npm run test:e2e                      # e2e tests (**/*.e2e-spec.ts)
-npx tsc --noEmit                      # typecheck
+npx tsc --noEmit                      # typecheck (source of truth when the editor shows stale errors)
 npm run lint                          # oxlint --type-aware
+npm run db:generate                   # drizzle-kit: generate a migration from src/database/schema.ts (read it before applying)
+npm run db:migrate                    # apply pending migrations to the dev database
+npm run db:seed                       # idempotent upsert of the catalog (src/database/seed/catalog.ts)
 ```
+
+Integration tests create `<POSTGRES_DB>_test` if missing and apply the `drizzle/` migrations in a global setup; each test truncates and inserts its own fixtures, and files run sequentially.
 
 `docker/postgres/init/*.sql` runs only when the Postgres volume is empty; it enables the `vector` extension. Later schema changes belong in migrations, not init scripts.
 
@@ -39,6 +45,10 @@ On Windows Git Bash (UCRT64), container paths passed to `docker exec` get rewrit
 - `providerState` is opaque: the adapter stores the raw assistant content in it and replays it verbatim when that message is sent back. It preserves Anthropic thinking blocks and Gemini thought signatures across tool-use turns.
 - Consecutive `tool` messages are merged into a single user turn (parallel tool results).
 - Unknown provider stop/finish reasons throw instead of being guessed.
+
+**Database (`src/database/`).** `DatabaseModule` is `@Global`: it builds a `pg` `Pool` (`PG_POOL`, fails startup if Postgres is unreachable, closed on shutdown) and a Drizzle instance exported as `DRIZZLE` (type `Database`). The schema in `schema.ts` is the single source for migrations in `drizzle/`. Money is stored as integer cents; invariants are also enforced by `CHECK` constraints. Scripts outside Nest (`drizzle.config.ts`, seed, test setup) read `.env` with `process.loadEnvFile()`.
+
+**Domain modules — ports only where there is logic to isolate.** `products` is read-only catalog: `ProductsService` injects `DRIZZLE` directly and is covered by integration tests. `stock` and `orders` hold business rules, so they use repository ports (`STOCK_REPOSITORY`, ...) consumed by services that are unit-tested with in-memory fakes. `DrizzleStockRepository.decrement` is all-or-nothing in one transaction, uses a conditional `UPDATE ... WHERE quantity >= n`, merges duplicate lines and sorts by product id to avoid deadlocks. `src/orders/domain/order.ts` is pure (no framework imports): immutable functions and an explicit transition table (`draft → confirmed | cancelled`, `confirmed → cancelled`). Domain errors (`OrderRuleError`, `InsufficientStockError`) are plain `Error` subclasses; mapping them to HTTP status codes happens at the controller edge. Request input is validated with Zod through `ZodValidationPipe` (`src/common/`).
 
 The plan's later phases build on this: an agent loop that consumes `LlmProvider`, a `ConversationStore` port with in-memory then Redis adapters, and tools that call domain services rather than the database.
 
