@@ -40,3 +40,10 @@ Supporting decisions:
 - `DrizzleStockRepository` must accept a transaction handle instead of opening its own transaction. The Drizzle `TransactionManager` wraps `db.transaction()` and builds both repositories with that handle.
 - Order rules are unit-tested in milliseconds. Atomicity and races (same idempotency key twice, two parallel confirmations) still need integration tests against real Postgres.
 - Every new use case that writes to several aggregates goes through `run`, and the set of repositories it receives grows with it.
+
+## Addendum: module wiring
+
+- `OrdersModule` provides `TRANSACTION_MANAGER` with `useClass: DrizzleTransactionManager` and exports only `OrdersService`. Consumers (controllers, agent tools) depend on the service, never on the transaction manager or the repositories.
+- Repositories are not Nest providers. The transaction manager builds `DrizzleOrderRepository` and `DrizzleStockRepository` with the open transaction, so `OrdersModule` does not import `StockModule`. The `STOCK_REPOSITORY` token stays for standalone stock use.
+- Trade-off: the orders adapter imports the stock adapter class directly. This couples the two adapter layers, which both target the same Postgres database; the domain and the service stay unaware of it. If stock moved to another store, the transaction manager would be the single place to change, and atomicity would then need a different approach (ADR 0003 alternatives).
+- The e2e boot test compiles `AppModule`, which proves the dependency graph resolves.

@@ -9,8 +9,9 @@ import { ProductsService } from './products/products.service.js';
 import { ProductsController } from './products/products.controller.js';
 import { ProductsModule } from './products/products.module.js';
 import { StockModule } from './stock/stock.module.js';
+import { OrdersModule } from './orders/orders.module.js';
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), LlmModule, DatabaseModule, ProductsModule, StockModule ],
+  imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), LlmModule, DatabaseModule, ProductsModule, StockModule, OrdersModule],
   controllers: [AppController, ProductsController],
   providers: [AppService, ProductsService],
 })
