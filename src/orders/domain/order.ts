@@ -20,6 +20,12 @@ export class OrderRuleError extends Error {
     this.name = 'OrderRuleError';
   }
 }
+export class OrderNotFoundError extends Error {
+  constructor(readonly orderId: string) {
+    super(`Order ${orderId} not found`);
+    this.name = 'OrderNotFoundError';
+  }
+}
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   draft: ['confirmed', 'cancelled'],

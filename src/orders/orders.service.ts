@@ -1,0 +1,21 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { TRANSACTION_MANAGER, type TransactionManager } from './transaction-manager.port.js';
+import { OrderNotFoundError, transition, type Order } from './domain/order.js';
+
+@Injectable()
+export class OrdersService {
+  constructor(@Inject(TRANSACTION_MANAGER) private readonly tx: TransactionManager) {}
+
+  async confirm(orderId: string): Promise<Order> {
+  return this.tx.run(async ({ orders, stock }) => {
+    const order = await orders.findById(orderId);
+    if (!order) throw new OrderNotFoundError(orderId);
+
+    const confirmed = transition(order, 'confirmed');
+    await stock.decrement(confirmed.lines);
+    await orders.save(confirmed);
+    return confirmed;
+  });
+}
+
+}
