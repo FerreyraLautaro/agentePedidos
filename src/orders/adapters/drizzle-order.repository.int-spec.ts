@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../test/integration/test-database.js';
 import type { Database } from '../../database/database.tokens.js';
 import { orders, products } from '../../database/schema.js';
-import type { Order } from '../domain/order.js';
+import { IdempotencyKeyReuseError, type Order } from '../domain/order.js';
 import { DrizzleOrderRepository } from './drizzle-order.repository.js';
 
 describe('DrizzleOrderRepository (integration)', () => {
@@ -91,5 +91,13 @@ describe('DrizzleOrderRepository (integration)', () => {
 
     expect(await repository.findByIdempotencyKey(userId, 'key-1')).toEqual(order);
     expect(await repository.findByIdempotencyKey(randomUUID(), 'key-1')).toBeNull();
+  });
+
+  it('rejects saving a key that another order of the same user already holds', async () => {
+    await repository.save(draftOrder({ status: 'confirmed', idempotencyKey: 'key-1' }));
+    const other = draftOrder({ status: 'confirmed', idempotencyKey: 'key-1' });
+
+    await expect(repository.save(other)).rejects.toBeInstanceOf(IdempotencyKeyReuseError);
+    expect(await repository.findById(other.id)).toBeNull();
   });
 });

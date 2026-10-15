@@ -36,4 +36,13 @@ Supporting decisions:
 
 - Integration tests race two confirmations against real Postgres: with different keys exactly one succeeds and stock drops once; with the same key both return the same confirmed order and stock drops once. Removing the lock makes them fail (stock ends at 6 instead of 8), and which test fails varies between runs, as races do.
 - Concurrent confirmations of the same order are serialized. This is negligible for one order but means a slow transaction holds the lock; transactions must stay short.
-- Same key on different orders still relies on the unique index; the `23505` error must be translated to `IdempotencyKeyReuseError` in the adapter.
+- Same key on different orders still relies on the unique index. `DrizzleOrderRepository` translates that violation into `IdempotencyKeyReuseError` (see below).
+
+## Addendum: translating the unique violation
+
+The row lock cannot serialize two different orders, so both can see the key as new and reach `save`. The second one hits the unique index and Postgres raises `23505`. Without translation, the raw `Failed query` error would leak past the port, and neither the HTTP layer nor the agent could map it.
+
+- Drizzle 0.45 wraps driver errors in `DrizzleQueryError`; the `pg` `DatabaseError`, with `code` and `constraint`, is its `cause`.
+- The adapter matches both the code `23505` and the constraint `orders_user_idempotency_key_unique`. A violation of any other unique index is rethrown unchanged instead of being disguised as an idempotency problem.
+- The `try/catch` wraps only the header upsert, the one statement that can violate that index.
+- The key is checked twice on purpose: the service lookup covers sequential retries with a clear error, and the unique index is the guarantee under races. The losing transaction rolls back, including its stock decrement, which the integration test asserts.

@@ -8,7 +8,7 @@ import { products, stock } from '../database/schema.js';
 import { InsufficientStockError } from '../stock/stock.errors.js';
 import { DrizzleOrderRepository } from './adapters/drizzle-order.repository.js';
 import { DrizzleTransactionManager } from './adapters/drizzle-transaction-manager.js';
-import { OrderRuleError } from './domain/order.js';
+import { IdempotencyKeyReuseError, OrderRuleError } from './domain/order.js';
 import { OrdersService } from './orders.service.js';
 
 describe('OrdersService.confirm (integration)', () => {
@@ -80,6 +80,27 @@ describe('OrdersService.confirm (integration)', () => {
 
     expect(first).toEqual(second);
     expect(first.status).toBe('confirmed');
+    expect(await yerbaStock()).toBe(8);
+  });
+
+  it('lets only one of two orders that race with the same key be confirmed', async () => {
+    const otherId = randomUUID();
+    await orders.save({
+      id: otherId,
+      userId,
+      status: 'draft',
+      lines: [{ productId: yerbaId, quantity: 2, unitPriceCents: 150 }],
+      idempotencyKey: null,
+    });
+
+    const results = await Promise.allSettled([
+      service.confirm(orderId, 'key-1'),
+      service.confirm(otherId, 'key-1'),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const [rejected] = results.filter((r) => r.status === 'rejected');
+    expect(rejected.reason).toBeInstanceOf(IdempotencyKeyReuseError);
     expect(await yerbaStock()).toBe(8);
   });
 });

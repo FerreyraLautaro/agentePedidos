@@ -1,10 +1,13 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, DrizzleQueryError, eq, sql } from 'drizzle-orm';
+import { DatabaseError } from 'pg';
 import type { DbExecutor } from '../../database/database.tokens.js';
 import { orderItems, orders } from '../../database/schema.js';
-import type { Order } from '../domain/order.js';
+import { IdempotencyKeyReuseError, type Order } from '../domain/order.js';
 import type { OrderRepository } from '../order-repository.port.js';
 
 type OrderRow = typeof orders.$inferSelect;
+
+const IDEMPOTENCY_KEY_UNIQUE = 'orders_user_idempotency_key_unique';
 
 /** Built by the transaction manager with an open transaction; it has no injection token on purpose. */
 export class DrizzleOrderRepository implements OrderRepository {
@@ -33,6 +36,16 @@ export class DrizzleOrderRepository implements OrderRepository {
     const now = new Date();
     // Header and lines change together; nested inside the transaction manager this becomes a savepoint.
     await this.db.transaction(async (tx) => {
+      await this.upsertHeader(tx, order, now);
+      await tx.delete(orderItems).where(eq(orderItems.orderId, order.id));
+      if (order.lines.length > 0) {
+        await tx.insert(orderItems).values(order.lines.map((line) => ({ orderId: order.id, ...line })));
+      }
+    });
+  }
+
+  private async upsertHeader(tx: DbExecutor, order: Order, now: Date): Promise<void> {
+    try {
       await tx
         .insert(orders)
         .values({
@@ -55,11 +68,13 @@ export class DrizzleOrderRepository implements OrderRepository {
             updatedAt: now,
           },
         });
-      await tx.delete(orderItems).where(eq(orderItems.orderId, order.id));
-      if (order.lines.length > 0) {
-        await tx.insert(orderItems).values(order.lines.map((line) => ({ orderId: order.id, ...line })));
+    } catch (error) {
+      // The unique index is the last guard when two orders race with the same key.
+      if (order.idempotencyKey !== null && isUniqueViolation(error, IDEMPOTENCY_KEY_UNIQUE)) {
+        throw new IdempotencyKeyReuseError(order.idempotencyKey);
       }
-    });
+      throw error;
+    }
   }
 
   private async withLines(row: OrderRow): Promise<Order> {
@@ -80,4 +95,10 @@ export class DrizzleOrderRepository implements OrderRepository {
       idempotencyKey: row.idempotencyKey,
     };
   }
+}
+
+// Drizzle wraps driver errors in DrizzleQueryError; the pg error with code and constraint is its cause.
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  const cause = error instanceof DrizzleQueryError ? error.cause : error;
+  return cause instanceof DatabaseError && cause.code === '23505' && cause.constraint === constraint;
 }
