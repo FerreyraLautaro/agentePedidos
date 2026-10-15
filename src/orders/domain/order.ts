@@ -27,6 +27,14 @@ export class OrderNotFoundError extends Error {
   }
 }
 
+export class IdempotencyKeyReuseError extends Error {
+  constructor(readonly idempotencyKey: string) {
+    super(`Idempotency key ${idempotencyKey} was already used for another order`);
+    this.name = 'IdempotencyKeyReuseError';
+  }
+}
+
+
 const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   draft: ['confirmed', 'cancelled'],
   confirmed: ['cancelled'],

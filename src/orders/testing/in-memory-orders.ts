@@ -25,6 +25,14 @@ export class InMemoryOrderRepository implements OrderRepository {
   restore(snapshot: Map<string, Order>): void {
     this.orders = new Map(snapshot);
   }
+
+  async findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<Order | null> {
+    for (const order of this.orders.values()) {
+      if (order.userId === userId && order.idempotencyKey === idempotencyKey) return order;
+    }
+    return null;
+  }
+
 }
 
 /** Simulates rollback by restoring a snapshot taken before `work` runs. */
