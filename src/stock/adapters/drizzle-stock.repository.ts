@@ -1,13 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
-import { DRIZZLE, type Database } from '../../database/database.tokens.js';
 import { stock } from '../../database/schema.js';
 import type { StockLine, StockRepository } from '../stock-repository.port.js';
 import { InsufficientStockError } from '../stock.errors.js';
+import { DRIZZLE, type DbExecutor } from '../../database/database.tokens.js';
 
 @Injectable()
 export class DrizzleStockRepository implements StockRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DbExecutor) { }
 
   async findByProductIds(productIds: string[]): Promise<StockLine[]> {
     if (productIds.length === 0) {
@@ -34,7 +34,8 @@ export class DrizzleStockRepository implements StockRepository {
         }
       }
       if (insufficient.length > 0) {
-        throw new InsufficientStockError(insufficient); // rolls back every decrement above
+        throw new InsufficientStockError(insufficient); // rolls back this transaction, or to its savepoint when nested
+
       }
     });
   }

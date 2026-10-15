@@ -33,6 +33,12 @@ export class InMemoryOrderRepository implements OrderRepository {
     return null;
   }
 
+    /** No real lock: in-memory tests are single-threaded. Locking is proven by integration tests. */
+  async findByIdForUpdate(id: string): Promise<Order | null> {
+    return this.findById(id);
+  }
+
+
 }
 
 /** Simulates rollback by restoring a snapshot taken before `work` runs. */

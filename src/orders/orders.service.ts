@@ -8,7 +8,7 @@ export class OrdersService {
 
     async confirm(orderId: string, idempotencyKey: string): Promise<Order> {
     return this.tx.run(async ({ orders, stock }) => {
-      const order = await orders.findById(orderId);
+      const order = await orders.findByIdForUpdate(orderId);
       if (!order) throw new OrderNotFoundError(orderId);
 
       const previous = await orders.findByIdempotencyKey(order.userId, idempotencyKey);

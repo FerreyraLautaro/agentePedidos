@@ -6,5 +6,7 @@ export interface OrderRepository {
   save(order: Order): Promise<void>;
 
   findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<Order | null>;
+  /** Loads the order and locks its row until the transaction ends. Use it before modifying the order. */
+  findByIdForUpdate(id: string): Promise<Order | null>;
 
 }
