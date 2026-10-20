@@ -10,9 +10,11 @@ import { ProductsController } from './products/products.controller.js';
 import { ProductsModule } from './products/products.module.js';
 import { StockModule } from './stock/stock.module.js';
 import { OrdersModule } from './orders/orders.module.js';
+import { APP_FILTER } from '@nestjs/core';
+import { DomainExceptionFilter } from './common/domain-exception.filter.js';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), LlmModule, DatabaseModule, ProductsModule, StockModule, OrdersModule],
   controllers: [AppController, ProductsController],
-  providers: [AppService, ProductsService],
+  providers: [AppService, ProductsService, { provide: APP_FILTER, useClass: DomainExceptionFilter }],
 })
 export class AppModule {}

@@ -64,7 +64,7 @@ Estas decisiones cuestan poco ahora y mucho después.
 
 1. ✅ `OrdersService` + puertos `OrderRepository` y `TransactionManager`: confirmar un pedido toca pedidos y stock en una sola transacción. Tests unitarios con falsos en memoria.
 2. ✅ Adaptador Drizzle de pedidos + idempotencia. Tests de integración con carreras reales: misma idempotency key dos veces y dos confirmaciones del mismo pedido en paralelo.
-3. Endpoints de `orders` y traducción de errores de dominio a HTTP (`OrderRuleError` e `InsufficientStockError` → 409, `OrderNotFoundError` → 404, `IdempotencyKeyReuseError` → 422). Antes, sumar al service crear borrador, agregar línea y cancelar (cancelar repone stock).
+3. ✅ Endpoints de `orders` y traducción de errores de dominio a HTTP (`OrderRuleError` e `InsufficientStockError` → 409, `OrderNotFoundError` → 404, `IdempotencyKeyReuseError` → 422). Antes, sumar al service crear borrador, agregar línea y cancelar (cancelar repone stock).
 4. JWT: tabla `users`, login, guard y migración con la FK de `orders.user_id`.
 
 Decisiones registradas en `docs/adr/`. Entrega: un PR al terminar el paso 2 (núcleo de pedidos) y otro con los pasos 3 y 4. Rama de trabajo: `feat/fase-1-dominio`.

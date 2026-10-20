@@ -17,10 +17,10 @@ Branch `feat/fase-1-dominio` (kept by user). Strategy: ask-on-risk. Forecast ~45
 ## Tasks
 - [x] T1 `ProductCatalog` port + in-memory fake + Drizzle adapter + module wiring (route: inline, small files, parent already held full context; no subagent spawned because the harness forbids spawning unless asked)
 - [x] T2 `OrdersService.createDraft` and `addLine` (unit RED 12 failed / 7 passed, then GREEN 37 passed)
-- [~] T3 `OrdersService.cancel` with restock when previously confirmed: unit GREEN; integration tests written (restock, confirm-vs-cancel race, parallel addLine) but NOT run, Docker daemon was down
-- [ ] T4 `OrdersController` + Zod DTOs
-- [ ] T5 Domain error to HTTP mapping (409 / 404 / 422) via exception filter
-- [ ] T6 ADR for price source + roadmap checkboxes
+- [x] T3 `OrdersService.cancel` with restock when previously confirmed: unit GREEN; integration GREEN (22 passed, includes restock, confirm-vs-cancel race, parallel addLine). Commit c89397f
+- [x] T4 `OrdersController` + Zod DTOs + `IdempotencyKey` param decorator (e2e caught that `@Headers()` ignores pipes)
+- [x] T5 `DomainExceptionFilter` (409 / 404 / 422), unit + e2e on in-memory fakes
+- [x] T6 ADR 0006 (price snapshot), ADR 0007 (error filter), roadmap step 3 checked
 
 ## Acceptance
 - Unit tests green for every new service method; integration test proves cancel restocks atomically.
@@ -28,7 +28,7 @@ Branch `feat/fase-1-dominio` (kept by user). Strategy: ask-on-risk. Forecast ~45
 - `npx tsc --noEmit` and `npm run lint` clean.
 
 ## Progress
-Exploration done. No code written yet.
+All tasks done. Final checks observed: `tsc --noEmit` clean, `oxlint` clean, 52 unit, 14 e2e, 22 integration passing.
 
 ## Next step
-T1.
+Step 4 of Fase 1: JWT (users table, login, guard, FK migration for `orders.user_id`). Then replace `userId` in the create-order body with the authenticated user.
