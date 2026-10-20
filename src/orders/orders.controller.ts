@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { IdempotencyKey } from '../common/idempotency-key.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
@@ -16,6 +16,11 @@ export class OrdersController {
   @Post()
   create(@Body(new ZodValidationPipe(createOrderBodySchema)) body: CreateOrderBody) {
     return this.ordersService.createDraft(body.userId);
+  }
+
+  @Get(':id')
+  getById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.getById(id);
   }
 
   @Post(':id/lines')

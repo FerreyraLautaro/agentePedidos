@@ -26,6 +26,15 @@ export class OrdersService {
     });
   }
 
+  async getById(orderId: string): Promise<Order> {
+    // A plain read: it takes no row lock, so reading never delays a confirmation (ADR 0005).
+    return this.tx.run(async ({ orders }) => {
+      const order = await orders.findById(orderId);
+      if (!order) throw new OrderNotFoundError(orderId);
+      return order;
+    });
+  }
+
   async addLine(orderId: string, productId: string, quantity: number): Promise<Order> {
     // The price is a snapshot read from the catalog, never supplied by the caller. It is read before the
     // transaction so the order row lock is not held while waiting on the catalog.

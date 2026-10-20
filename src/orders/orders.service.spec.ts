@@ -159,6 +159,18 @@ describe('OrdersService draft editing', () => {
     });
   });
 
+  describe('getById', () => {
+    it('returns the order with its lines', async () => {
+      await orders.save(draftOrder());
+
+      expect(await service.getById('order-1')).toEqual(draftOrder());
+    });
+
+    it('throws OrderNotFoundError when the order does not exist', async () => {
+      await expect(service.getById('missing')).rejects.toBeInstanceOf(OrderNotFoundError);
+    });
+  });
+
   describe('cancel', () => {
     it('cancels a draft without touching stock', async () => {
       await orders.save(draftOrder());

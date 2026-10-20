@@ -48,6 +48,27 @@ describe('OrdersController (e2e)', () => {
     expect(res.body).toMatchObject({ userId, status: 'draft', lines: [] });
   });
 
+  it('returns an existing order', async () => {
+    const id = await createDraft();
+    await request(app.getHttpServer()).post(`/orders/${id}/lines`).send({ productId: yerbaId, quantity: 2 }).expect(201);
+
+    const res = await request(app.getHttpServer()).get(`/orders/${id}`).expect(200);
+
+    expect(res.body).toMatchObject({
+      id,
+      status: 'draft',
+      lines: [{ productId: yerbaId, quantity: 2, unitPriceCents: 150 }],
+    });
+  });
+
+  it('answers 404 when reading an unknown order', async () => {
+    await request(app.getHttpServer()).get(`/orders/${randomUUID()}`).expect(404);
+  });
+
+  it('rejects reading a malformed order id with 400', async () => {
+    await request(app.getHttpServer()).get('/orders/not-a-uuid').expect(400);
+  });
+
   it('rejects a draft without a valid userId with 400', async () => {
     await request(app.getHttpServer()).post('/orders').send({ userId: 'nope' }).expect(400);
   });
