@@ -19,8 +19,8 @@ In: `src/auth/**`, `src/users/**` (or inside auth), `src/database/schema.ts`, `d
 
 ## Tasks
 - [x] T1 `users` table + FK migration + fix existing integration tests (helper to create users). Migration 0003; 23 integration tests green incl. FK test; dev DB had 0 orders, test DB orphan rows truncated once
-- [ ] T2 `PasswordHasher` port + argon2 adapter + in-memory/fake hasher; `UserRepository` port + fake + Drizzle adapter
-- [ ] T3 `AuthService` register/login (unit first) + env `JWT_SECRET`, `JWT_EXPIRES_IN`
+- [x] T2 `PasswordHasher` port + argon2 adapter (works on Windows, prebuilt binary; bcrypt fallback documented) + fake hasher; `UserRepository` port + fake + Drizzle adapter (unique violation translated, race test). `isUniqueViolation` extracted to `src/database/unique-violation.ts`
+- [x] T3 `AuthService` register/login (unit RED: module missing, then GREEN 64 passed) + env `JWT_SECRET`, `JWT_EXPIRES_IN`. `.env` and `.env.example` could NOT be edited (permission denied): the user must add the variables
 - [ ] T4 `AuthController` (`POST /auth/register`, `POST /auth/login`) + e2e
 - [ ] T5 `JwtAuthGuard` + `@CurrentUser()`; orders use the authenticated user; ownership checks in `OrdersService`
 - [ ] T6 ADR 0008, roadmap checkboxes

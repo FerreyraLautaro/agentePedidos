@@ -1,7 +1,7 @@
-import { and, asc, DrizzleQueryError, eq, sql } from 'drizzle-orm';
-import { DatabaseError } from 'pg';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../../database/database.tokens.js';
 import { orderItems, orders } from '../../database/schema.js';
+import { isUniqueViolation } from '../../database/unique-violation.js';
 import { IdempotencyKeyReuseError, type Order } from '../domain/order.js';
 import type { OrderRepository } from '../order-repository.port.js';
 
@@ -95,10 +95,4 @@ export class DrizzleOrderRepository implements OrderRepository {
       idempotencyKey: row.idempotencyKey,
     };
   }
-}
-
-// Drizzle wraps driver errors in DrizzleQueryError; the pg error with code and constraint is its cause.
-function isUniqueViolation(error: unknown, constraint: string): boolean {
-  const cause = error instanceof DrizzleQueryError ? error.cause : error;
-  return cause instanceof DatabaseError && cause.code === '23505' && cause.constraint === constraint;
 }
