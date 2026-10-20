@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { insertUser } from '../../test/integration/fixtures.js';
 import { createTestDatabase } from '../../test/integration/test-database.js';
 import type { Database } from '../database/database.tokens.js';
 import { products, stock } from '../database/schema.js';
@@ -35,7 +36,8 @@ describe('OrdersService.confirm (integration)', () => {
   afterAll(() => pool.end());
 
   beforeEach(async () => {
-    await db.execute(sql`TRUNCATE TABLE orders, products CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE orders, products, users CASCADE`);
+    await insertUser(db, userId);
     const [yerba] = await db
       .insert(products)
       .values({ sku: 'DES-001', name: 'Yerba', description: 'x', category: 'x', priceCents: 150 })

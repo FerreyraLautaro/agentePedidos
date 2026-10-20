@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { insertUser } from '../../../test/integration/fixtures.js';
 import { createTestDatabase } from '../../../test/integration/test-database.js';
 import type { Database } from '../../database/database.tokens.js';
 import { orders, products } from '../../database/schema.js';
@@ -35,7 +36,8 @@ describe('DrizzleOrderRepository (integration)', () => {
   afterAll(() => pool.end());
 
   beforeEach(async () => {
-    await db.execute(sql`TRUNCATE TABLE orders, products CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE orders, products, users CASCADE`);
+    await insertUser(db, userId);
     const [yerba, leche] = await db
       .insert(products)
       .values([
@@ -54,6 +56,13 @@ describe('DrizzleOrderRepository (integration)', () => {
 
     expect(await repository.findById(order.id)).toEqual(order);
     expect(await repository.findByIdForUpdate(order.id)).toEqual(order);
+  });
+
+  it('refuses an order whose user does not exist', async () => {
+    const orphan = draftOrder({ userId: randomUUID() });
+
+    await expect(repository.save(orphan)).rejects.toThrow();
+    expect(await repository.findById(orphan.id)).toBeNull();
   });
 
   it('returns null for an unknown order', async () => {
