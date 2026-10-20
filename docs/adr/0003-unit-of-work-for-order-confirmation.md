@@ -1,17 +1,17 @@
-# ADR 0003: Unit of Work for order confirmation
+# ADR 0003: Unit of Work para la confirmación de pedidos
 
-- Status: Accepted
-- Date: 2026-10-15
+- Estado: Aceptado
+- Fecha: 2026-10-15
 
-## Context
+## Contexto
 
-Confirming an order writes to two places: it decrements stock and saves the order as `confirmed`. If each repository opens its own transaction, a failure between them leaves stock decremented while the order is still a draft, and nothing undoes it.
+Confirmar un pedido escribe en dos lugares: descuenta el stock y guarda el pedido como `confirmed`. Si cada repository abre su propia transacción, un fallo entre ambas deja el stock descontado mientras el pedido sigue en `draft`, y nada lo deshace.
 
-Opening `db.transaction()` inside `OrdersService` would solve atomicity, but it brings Drizzle into the layer that holds business rules and prevents unit testing it with in-memory fakes.
+Abrir `db.transaction()` dentro de `OrdersService` resolvería la atomicidad, pero metería Drizzle en la capa que contiene las reglas de negocio e impediría testearla como unit test con fakes en memoria.
 
-## Decision
+## Decisión
 
-A `TransactionManager` port (token `TRANSACTION_MANAGER`) runs a block of work in one transaction and hands it repositories bound to that transaction:
+Un port `TransactionManager` (token `TRANSACTION_MANAGER`) ejecuta un bloque de trabajo en una sola transacción y le entrega repositories atados a esa transacción:
 
 ```ts
 interface TransactionManager {
@@ -19,31 +19,31 @@ interface TransactionManager {
 }
 ```
 
-`OrdersService.confirm` loads the order, applies `transition(order, 'confirmed')`, decrements stock and saves the order, all inside `run`. If anything throws, nothing is persisted.
+`OrdersService.confirm` carga el pedido, aplica `transition(order, 'confirmed')`, descuenta el stock y guarda el pedido, todo dentro de `run`. Si algo lanza un error, no se persiste nada.
 
-Supporting decisions:
+Decisiones de apoyo:
 
-- `OrderRepository` has no injection token. It is reachable only inside `run`, so it cannot be used outside a transaction by mistake.
-- `findById` returns `null` instead of throwing. The service maps it to `OrderNotFoundError` (HTTP 404), which is kept separate from `OrderRuleError` (HTTP 409).
-- `save` persists the whole aggregate, header and lines. Rules stay in the pure domain (`src/orders/domain/order.ts`). The repository exposes no `addLine` or `updateStatus`.
-- The pure domain transition runs before any I/O, so invalid confirmations fail without writes.
-- The in-memory fake simulates rollback by restoring a snapshot taken before `work` runs. A shallow copy is enough because `Order` is immutable.
+- `OrderRepository` no tiene injection token. Solo es accesible dentro de `run`, así que no se puede usar por error fuera de una transacción.
+- `findById` devuelve `null` en vez de lanzar un error. El service lo traduce a `OrderNotFoundError` (HTTP 404), que se mantiene separado de `OrderRuleError` (HTTP 409).
+- `save` persiste el aggregate completo, header y líneas. Las reglas quedan en el domain puro (`src/orders/domain/order.ts`). El repository no expone `addLine` ni `updateStatus`.
+- La transición del domain, que es pura, corre antes de cualquier I/O, de modo que las confirmaciones inválidas fallan sin escribir nada.
+- El fake en memoria simula el rollback restaurando un snapshot tomado antes de ejecutar `work`. Una copia superficial alcanza porque `Order` es inmutable.
 
-## Alternatives considered
+## Alternativas consideradas
 
-- **Transaction inside the service with Drizzle.** Simple, but it couples business logic to the ORM and forces integration tests for every rule.
-- **Ambient transaction with `AsyncLocalStorage` (for example `@nestjs-cls/transactional`).** Repositories stay injectable, but the transaction becomes implicit and harder to explain and test.
-- **Saga or compensation (decrement, then increment on failure).** Needed across services or databases, but unnecessary complexity inside one Postgres instance.
+- **Transacción dentro del service con Drizzle.** Es simple, pero acopla la lógica de negocio al ORM y obliga a escribir integration tests para cada regla.
+- **Transacción ambient con `AsyncLocalStorage` (por ejemplo `@nestjs-cls/transactional`).** Los repositories siguen siendo inyectables, pero la transacción se vuelve implícita y más difícil de explicar y de testear.
+- **Saga o compensación (descontar y, si algo falla, reponer).** Hace falta entre services o bases de datos distintas, pero es una complejidad innecesaria dentro de una sola instancia de Postgres.
 
-## Consequences
+## Consecuencias
 
-- `DrizzleStockRepository` must accept a transaction handle instead of opening its own transaction. The Drizzle `TransactionManager` wraps `db.transaction()` and builds both repositories with that handle.
-- Order rules are unit-tested in milliseconds. Atomicity and races (same idempotency key twice, two parallel confirmations) still need integration tests against real Postgres.
-- Every new use case that writes to several aggregates goes through `run`, and the set of repositories it receives grows with it.
+- `DrizzleStockRepository` debe aceptar un handle de transacción en vez de abrir la suya. El `TransactionManager` de Drizzle envuelve `db.transaction()` y construye ambos repositories con ese handle.
+- Las reglas de pedidos se testean como unit tests en milisegundos. La atomicidad y las races (la misma idempotency key dos veces, dos confirmaciones en paralelo) siguen necesitando integration tests contra Postgres real.
+- Todo caso de uso nuevo que escriba en varios aggregates pasa por `run`, y el conjunto de repositories que recibe crece con él.
 
-## Addendum: module wiring
+## Anexo: module wiring
 
-- `OrdersModule` provides `TRANSACTION_MANAGER` with `useClass: DrizzleTransactionManager` and exports only `OrdersService`. Consumers (controllers, agent tools) depend on the service, never on the transaction manager or the repositories.
-- Repositories are not Nest providers. The transaction manager builds `DrizzleOrderRepository` and `DrizzleStockRepository` with the open transaction, so `OrdersModule` does not import `StockModule`. The `STOCK_REPOSITORY` token stays for standalone stock use.
-- Trade-off: the orders adapter imports the stock adapter class directly. This couples the two adapter layers, which both target the same Postgres database; the domain and the service stay unaware of it. If stock moved to another store, the transaction manager would be the single place to change, and atomicity would then need a different approach (ADR 0003 alternatives).
-- The e2e boot test compiles `AppModule`, which proves the dependency graph resolves.
+- `OrdersModule` provee `TRANSACTION_MANAGER` con `useClass: DrizzleTransactionManager` y exporta solamente `OrdersService`. Los consumers (controllers, tools del agente) dependen del service, nunca del transaction manager ni de los repositories.
+- Los repositories no son providers de Nest. El transaction manager construye `DrizzleOrderRepository` y `DrizzleStockRepository` con la transacción abierta, por lo que `OrdersModule` no importa `StockModule`. El token `STOCK_REPOSITORY` queda para usar el stock de forma independiente.
+- Trade-off: el adapter de orders importa directamente la clase del adapter de stock. Esto acopla las dos capas de adapters, que apuntan a la misma base Postgres; el domain y el service no se enteran. Si el stock se mudara a otro store, el transaction manager sería el único lugar a cambiar, y la atomicidad necesitaría otro enfoque (alternativas de este ADR).
+- El test e2e de arranque compila `AppModule`, lo que demuestra que el grafo de dependencias se resuelve.

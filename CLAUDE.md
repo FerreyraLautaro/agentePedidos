@@ -10,6 +10,7 @@ A NestJS lab project: an LLM-powered ordering agent for a neighborhood grocery s
 
 - The user is learning. Before implementing, explain the concept and where each piece is instantiated or wired; then advance one step at a time and wait for confirmation. By default give instructions for the user to implement; write code directly only when asked.
 - Talk to the user in Spanish. Code, comments, identifiers, commit messages, and PR descriptions are in English, using Conventional Commits.
+- ADRs in `docs/adr/` (`NNNN-slug.md`: Contexto, Decisión, Alternativas consideradas, Consecuencias) are the user's study material: write them in Spanish, keeping technical terms in English (port, adapter, fake, lock, rollback, race, retry, unique index, etc.). File names stay in English. Add one whenever a design decision is explained.
 
 ## Commands
 

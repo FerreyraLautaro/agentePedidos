@@ -1,48 +1,48 @@
-# ADR 0005: Row lock for concurrent order confirmations
+# ADR 0005: Row lock para confirmaciones concurrentes de pedidos
 
-- Status: Accepted
-- Date: 2026-10-15
+- Estado: Aceptado
+- Fecha: 2026-10-15
 
-## Context
+## Contexto
 
-Postgres runs at `READ COMMITTED` by default: a plain `SELECT` takes no lock and reads the last committed version. Two confirmations of the same order that run in parallel both read `draft`, both pass the domain transition and both decrement stock. The conditional stock update (ADR 0002) prevents overselling, but not decrementing twice for the same order: they are different invariants.
+Postgres corre por defecto en `READ COMMITTED`: un `SELECT` común no toma ningún lock y lee la última versión confirmada (committed). Dos confirmaciones del mismo pedido que corren en paralelo leen ambas `draft`, ambas pasan la transición del domain y ambas descuentan el stock. El conditional update del stock (ADR 0002) evita el oversell, pero no que se descuente dos veces por el mismo pedido: son invariantes distintas.
 
-The unique index `(user_id, idempotency_key)` does not help either:
+El unique index `(user_id, idempotency_key)` tampoco alcanza:
 
-| Race | Stopped by the unique index? |
+| Race | ¿La frena el unique index? |
 |---|---|
-| Same key, different orders | Yes: the second transaction waits for the first and fails with `23505` |
-| Same key, same order | No: both write the same key on the same row |
-| Different keys, same order | No: nothing is duplicated |
+| Misma key, pedidos distintos | Sí: la segunda transacción espera a la primera y falla con `23505` |
+| Misma key, mismo pedido | No: las dos escriben la misma key en la misma fila |
+| Keys distintas, mismo pedido | No: no hay nada duplicado |
 
-## Decision
+## Decisión
 
-Confirmation loads the order with `SELECT ... FOR UPDATE` through a dedicated port method, `OrderRepository.findByIdForUpdate`. The second transaction waits on that select until the first one ends, then reads the committed state. The service logic already covered by unit tests decides correctly from there: the same key returns the order (ADR 0004), and a different key fails the transition with `OrderRuleError`.
+La confirmación carga el pedido con `SELECT ... FOR UPDATE` mediante un método dedicado del port, `OrderRepository.findByIdForUpdate`. La segunda transacción espera en ese select hasta que la primera termina, y entonces lee el estado ya confirmado. A partir de ahí, la lógica del service, ya cubierta por unit tests, decide bien: la misma key devuelve el pedido (ADR 0004) y una key distinta hace fallar la transición con `OrderRuleError`.
 
-Supporting decisions:
+Decisiones de apoyo:
 
-- `findById` stays lock-free, because reads such as `GET /orders/:id` must not block confirmations.
-- The in-memory fake implements `findByIdForUpdate` as `findById`. A unit test cannot observe a lock; spying on the call would test the implementation, not the behavior. Locking is proven by integration tests.
-- No deadlock is introduced: every confirmation locks the order first, then stock rows sorted by product id.
-- Repositories take a `DbExecutor` (the database or an open transaction). Their own `.transaction()` calls become savepoints when nested, so they keep their all-or-nothing guarantee standalone and inside the transaction manager.
+- `findById` sigue sin tomar locks, porque lecturas como `GET /orders/:id` no deben frenar las confirmaciones.
+- El fake en memoria implementa `findByIdForUpdate` igual que `findById`. Un unit test no puede observar un lock; espiar la llamada (spy) testearía la implementación y no el comportamiento. El locking se demuestra con integration tests.
+- No se introduce ningún deadlock: toda confirmación toma primero el lock del pedido y después el de las filas de stock ordenadas por id de producto.
+- Los repositories reciben un `DbExecutor` (la base de datos o una transacción abierta). Sus propias llamadas a `.transaction()` se convierten en savepoints cuando están anidadas, así conservan su garantía de todo o nada tanto standalone como dentro del transaction manager.
 
-## Alternatives considered
+## Alternativas consideradas
 
-- **Conditional status update (`UPDATE orders ... WHERE status = 'draft'`).** Detects the lost race in one statement, but the loser always gets an error, even when it is a retry with the same key, which breaks ADR 0004. It also moves a domain rule into `save`.
-- **`SERIALIZABLE` isolation.** Correct, but Postgres aborts one transaction with `40001` and the application needs a retry loop. Heavier to run and to explain.
-- **Optimistic locking with a version column.** Fits long edits; on a confirmation race it also turns a valid retry into an error unless it re-reads and retries.
+- **Conditional update de estado (`UPDATE orders ... WHERE status = 'draft'`).** Detecta la race perdida en una sola sentencia, pero el perdedor siempre recibe un error, incluso cuando es un retry con la misma key, lo que rompe el ADR 0004. Además mueve una regla del domain al `save`.
+- **Isolation level `SERIALIZABLE`.** Es correcto, pero Postgres aborta una transacción con `40001` y la aplicación necesita un retry loop. Es más pesado de operar y de explicar.
+- **Optimistic locking con una columna de versión.** Sirve para ediciones largas; en una race de confirmaciones también convierte un retry válido en un error, salvo que se vuelva a leer y reintentar.
 
-## Consequences
+## Consecuencias
 
-- Integration tests race two confirmations against real Postgres: with different keys exactly one succeeds and stock drops once; with the same key both return the same confirmed order and stock drops once. Removing the lock makes them fail (stock ends at 6 instead of 8), and which test fails varies between runs, as races do.
-- Concurrent confirmations of the same order are serialized. This is negligible for one order but means a slow transaction holds the lock; transactions must stay short.
-- Same key on different orders still relies on the unique index. `DrizzleOrderRepository` translates that violation into `IdempotencyKeyReuseError` (see below).
+- Los integration tests hacen competir dos confirmaciones contra Postgres real: con keys distintas, exactamente una tiene éxito y el stock baja una sola vez; con la misma key, ambas devuelven el mismo pedido confirmado y el stock baja una sola vez. Sin el lock los tests fallan (el stock termina en 6 en lugar de 8), y cuál falla varía entre corridas, como pasa con las races.
+- Las confirmaciones concurrentes del mismo pedido se serializan. Para un solo pedido es despreciable, pero implica que una transacción lenta mantiene el lock; las transacciones deben ser cortas.
+- La misma key en pedidos distintos sigue dependiendo del unique index. `DrizzleOrderRepository` traduce esa violación a `IdempotencyKeyReuseError` (ver más abajo).
 
-## Addendum: translating the unique violation
+## Anexo: traducción de la unique violation
 
-The row lock cannot serialize two different orders, so both can see the key as new and reach `save`. The second one hits the unique index and Postgres raises `23505`. Without translation, the raw `Failed query` error would leak past the port, and neither the HTTP layer nor the agent could map it.
+El row lock no puede serializar dos pedidos distintos, así que ambos pueden ver la key como nueva y llegar a `save`. El segundo choca con el unique index y Postgres lanza `23505`. Sin traducción, el error crudo `Failed query` se filtraría más allá del port, y ni la capa HTTP ni el agente podrían mapearlo.
 
-- Drizzle 0.45 wraps driver errors in `DrizzleQueryError`; the `pg` `DatabaseError`, with `code` and `constraint`, is its `cause`.
-- The adapter matches both the code `23505` and the constraint `orders_user_idempotency_key_unique`. A violation of any other unique index is rethrown unchanged instead of being disguised as an idempotency problem.
-- The `try/catch` wraps only the header upsert, the one statement that can violate that index.
-- The key is checked twice on purpose: the service lookup covers sequential retries with a clear error, and the unique index is the guarantee under races. The losing transaction rolls back, including its stock decrement, which the integration test asserts.
+- Drizzle 0.45 envuelve los errores del driver en `DrizzleQueryError`; el `DatabaseError` de `pg`, con `code` y `constraint`, es su `cause`.
+- El adapter compara tanto el código `23505` como el nombre de la constraint `orders_user_idempotency_key_unique`. Una violación de cualquier otro unique index se relanza (rethrow) sin cambios en vez de disfrazarse de problema de idempotencia.
+- El `try/catch` envuelve solo el upsert del header, la única sentencia que puede violar ese índice.
+- La key se verifica dos veces a propósito (defense in depth): el lookup del service cubre los retries secuenciales con un error claro, y el unique index es la garantía bajo races. La transacción perdedora hace rollback, incluido su stock decrement, lo cual el integration test verifica.

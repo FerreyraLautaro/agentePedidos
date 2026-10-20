@@ -1,35 +1,35 @@
-# ADR 0004: Idempotent order confirmation
+# ADR 0004: Order confirmation idempotente
 
-- Status: Accepted
-- Date: 2026-10-15
+- Estado: Aceptado
+- Fecha: 2026-10-15
 
-## Context
+## Contexto
 
-A client that confirms an order and loses the response cannot tell whether the confirmation happened, so it retries. The agent makes this common: an LLM that retries a tool call after a timeout is the typical case. Without idempotency, a retry either fails with "already confirmed" although the client's intent succeeded, or, in a race, decrements stock twice.
+Un cliente que confirma un pedido y pierde la response no puede saber si la confirmación ocurrió, así que hace retry. El agente vuelve esto frecuente: un LLM que reintenta una tool call tras un timeout es el caso típico. Sin idempotencia, un retry falla con "ya confirmado" aunque la intención del cliente se cumplió o, en una race, descuenta el stock dos veces.
 
-## Decision
+## Decisión
 
-`OrdersService.confirm(orderId, idempotencyKey)` requires a client-generated key, unique per operation attempt and scoped per user. The key is stored on the order, and the unique index `(user_id, idempotency_key)` enforces it in the database.
+`OrdersService.confirm(orderId, idempotencyKey)` exige una key generada por el cliente, única por intento de operación y acotada por usuario. La key se guarda en el pedido, y el unique index `(user_id, idempotency_key)` la hace cumplir en la base de datos.
 
-| Situation | Result |
+| Situación | Resultado |
 |---|---|
-| New key | Confirm the order and store the key on it |
-| Same key, same order (retry) | Return the stored order; stock is not touched |
-| Same key, different order | `IdempotencyKeyReuseError` (HTTP 422): a client bug |
-| Different key, order already confirmed | `OrderRuleError` (HTTP 409), as before |
+| Key nueva | Confirma el pedido y guarda la key en él |
+| Misma key, mismo pedido (retry) | Devuelve el pedido guardado; el stock no se toca |
+| Misma key, otro pedido | `IdempotencyKeyReuseError` (HTTP 422): un bug del cliente |
+| Key distinta, pedido ya confirmado | `OrderRuleError` (HTTP 409), como antes |
 
-Inside the transaction the service loads the order, then looks up the key with `findByIdempotencyKey(order.userId, key)`, and only then applies the domain transition. The key check must come first: otherwise a retry reaches `transition(confirmed → confirmed)` and fails.
+Dentro de la transacción, el service carga el pedido, busca la key con `findByIdempotencyKey(order.userId, key)` y recién después aplica la transición del domain. El check de la key tiene que ir primero: de lo contrario un retry llegaría a `transition(confirmed → confirmed)` y fallaría.
 
-A retry returns the order in its current state. If the order was confirmed with a key and later cancelled, a retry with that key returns the cancelled order. This reports the truth instead of replaying a stale response.
+Un retry devuelve el pedido en su estado actual. Si el pedido se confirmó con una key y después se canceló, un retry con esa key devuelve el pedido cancelado. Así se informa la verdad en vez de repetir una response vieja.
 
-## Alternatives considered
+## Alternativas consideradas
 
-- **No key, treat "already confirmed" as success.** Simpler, but a client cannot distinguish its own retry from someone else's confirmation, and it hides client bugs.
-- **Stored response replay (Stripe style).** Keeps the original response byte for byte, but needs a separate table with request fingerprints and expiry. It is overkill while confirmation is the only idempotent operation.
-- **Key in a separate `idempotency_keys` table.** Generalizes to other operations, but adds a join and a second write for a single use case. Can be extracted when a second idempotent operation appears.
+- **Sin key, tratar "ya confirmado" como éxito.** Es más simple, pero el cliente no puede distinguir su propio retry de la confirmación de otro, y oculta bugs del cliente.
+- **Replay de la response guardada (estilo Stripe).** Conserva la response original byte a byte, pero necesita una tabla aparte con fingerprints de los requests y expiración. Es excesivo mientras la confirmación sea la única operación idempotente.
+- **Key en una tabla `idempotency_keys` separada.** Se generaliza a otras operaciones, pero agrega un join y una segunda escritura para un solo caso de uso. Se puede extraer cuando aparezca una segunda operación idempotente.
 
-## Consequences
+## Consecuencias
 
-- Sequential retries are safe and covered by unit tests with in-memory fakes.
-- Concurrent requests with the same key both see a new key in their own transaction. Protection relies on the database: a row lock on the order or a conditional status update, plus the unique index. This is covered by integration tests in the Drizzle adapter.
-- The HTTP layer will take the key from an `Idempotency-Key` header and the agent tool will generate one per confirmation attempt.
+- Los retries secuenciales son seguros y están cubiertos por unit tests con fakes en memoria.
+- Dos requests concurrentes con la misma key ven ambos una key nueva dentro de su propia transacción. La protección recae en la base de datos: un row lock sobre el pedido o un conditional update de estado, más el unique index. Esto se cubre con integration tests del adapter Drizzle.
+- La capa HTTP tomará la key de un header `Idempotency-Key`, y la tool del agente generará una por cada intento de confirmación.

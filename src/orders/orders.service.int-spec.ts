@@ -7,6 +7,7 @@ import type { Database } from '../database/database.tokens.js';
 import { products, stock } from '../database/schema.js';
 import { InsufficientStockError } from '../stock/stock.errors.js';
 import { DrizzleOrderRepository } from './adapters/drizzle-order.repository.js';
+import { DrizzleProductCatalog } from './adapters/drizzle-product-catalog.js';
 import { DrizzleTransactionManager } from './adapters/drizzle-transaction-manager.js';
 import { IdempotencyKeyReuseError, OrderRuleError } from './domain/order.js';
 import { OrdersService } from './orders.service.js';
@@ -27,7 +28,7 @@ describe('OrdersService.confirm (integration)', () => {
 
   beforeAll(() => {
     ({ pool, db } = createTestDatabase());
-    service = new OrdersService(new DrizzleTransactionManager(db));
+    service = new OrdersService(new DrizzleTransactionManager(db), new DrizzleProductCatalog(db));
     orders = new DrizzleOrderRepository(db);
   });
 
@@ -102,5 +103,31 @@ describe('OrdersService.confirm (integration)', () => {
     const [rejected] = results.filter((r) => r.status === 'rejected');
     expect(rejected.reason).toBeInstanceOf(IdempotencyKeyReuseError);
     expect(await yerbaStock()).toBe(8);
+  });
+
+  it('gives the stock back when a confirmed order is cancelled', async () => {
+    await service.confirm(orderId, 'key-1');
+    expect(await yerbaStock()).toBe(8);
+
+    await service.cancel(orderId);
+
+    expect(await orders.findById(orderId)).toMatchObject({ status: 'cancelled' });
+    expect(await yerbaStock()).toBe(10);
+  });
+
+  it('ends cancelled with stock intact when confirm and cancel race on the same draft', async () => {
+    await Promise.allSettled([service.confirm(orderId, 'key-1'), service.cancel(orderId)]);
+
+    // Whichever transaction wins the row lock, the other sees its result: the stock never leaks.
+    expect(await orders.findById(orderId)).toMatchObject({ status: 'cancelled' });
+    expect(await yerbaStock()).toBe(10);
+  });
+
+  it('prices a new line from the database and loses no update when two lines are added in parallel', async () => {
+    await Promise.all([service.addLine(orderId, yerbaId, 1), service.addLine(orderId, yerbaId, 1)]);
+
+    expect((await orders.findById(orderId))?.lines).toEqual([
+      { productId: yerbaId, quantity: 4, unitPriceCents: 150 },
+    ]);
   });
 });
