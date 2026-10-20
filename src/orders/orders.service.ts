@@ -11,6 +11,7 @@ import {
   type Order,
 } from './domain/order.js';
 
+/** Every operation acts on behalf of a user and only sees that user's orders. */
 @Injectable()
 export class OrdersService {
   constructor(
@@ -26,24 +27,19 @@ export class OrdersService {
     });
   }
 
-  async getById(orderId: string): Promise<Order> {
+  async getById(userId: string, orderId: string): Promise<Order> {
     // A plain read: it takes no row lock, so reading never delays a confirmation (ADR 0005).
-    return this.tx.run(async ({ orders }) => {
-      const order = await orders.findById(orderId);
-      if (!order) throw new OrderNotFoundError(orderId);
-      return order;
-    });
+    return this.tx.run(async ({ orders }) => ownedBy(userId, orderId, await orders.findById(orderId)));
   }
 
-  async addLine(orderId: string, productId: string, quantity: number): Promise<Order> {
+  async addLine(userId: string, orderId: string, productId: string, quantity: number): Promise<Order> {
     // The price is a snapshot read from the catalog, never supplied by the caller. It is read before the
     // transaction so the order row lock is not held while waiting on the catalog.
     const [price] = await this.catalog.findPrices([productId]);
     if (!price) throw new ProductNotFoundError(productId);
 
     return this.tx.run(async ({ orders }) => {
-      const order = await orders.findByIdForUpdate(orderId);
-      if (!order) throw new OrderNotFoundError(orderId);
+      const order = ownedBy(userId, orderId, await orders.findByIdForUpdate(orderId));
 
       const updated = addLine(order, { productId, quantity, unitPriceCents: price.priceCents });
       await orders.save(updated);
@@ -51,10 +47,9 @@ export class OrdersService {
     });
   }
 
-  async confirm(orderId: string, idempotencyKey: string): Promise<Order> {
+  async confirm(userId: string, orderId: string, idempotencyKey: string): Promise<Order> {
     return this.tx.run(async ({ orders, stock }) => {
-      const order = await orders.findByIdForUpdate(orderId);
-      if (!order) throw new OrderNotFoundError(orderId);
+      const order = ownedBy(userId, orderId, await orders.findByIdForUpdate(orderId));
 
       const previous = await orders.findByIdempotencyKey(order.userId, idempotencyKey);
       if (previous) {
@@ -69,10 +64,9 @@ export class OrdersService {
     });
   }
 
-  async cancel(orderId: string): Promise<Order> {
+  async cancel(userId: string, orderId: string): Promise<Order> {
     return this.tx.run(async ({ orders, stock }) => {
-      const order = await orders.findByIdForUpdate(orderId);
-      if (!order) throw new OrderNotFoundError(orderId);
+      const order = ownedBy(userId, orderId, await orders.findByIdForUpdate(orderId));
 
       const cancelled = transition(order, 'cancelled');
       // Only a confirmed order took stock; a draft never touched it.
@@ -81,4 +75,10 @@ export class OrdersService {
       return cancelled;
     });
   }
+}
+
+/** An order that belongs to someone else is reported as missing, so order ids do not leak existence. */
+function ownedBy(userId: string, orderId: string, order: Order | null): Order {
+  if (!order || order.userId !== userId) throw new OrderNotFoundError(orderId);
+  return order;
 }

@@ -50,14 +50,14 @@ Estas decisiones cuestan poco ahora y mucho después.
 
 **Investigar:** diseño de contratos de API, validación con Zod o class-validator, idempotency keys.
 
-- [ ] Módulos `products`, `stock` y `orders` con endpoints REST
+- [X] Módulos `products`, `stock` y `orders` con endpoints REST
   - [X] `products`: `GET /products` (filtros, búsqueda, paginación) y `GET /products/:id`
   - [X] `stock`: puerto `StockRepository` con decremento atómico todo o nada (sin endpoints todavía)
-  - [ ] `orders`: endpoints
+  - [X] `orders`: endpoints (ADR 0006 y 0007)
 - [X] Seed de un catálogo realista (50–200 productos con descripción, categoría, precio y stock)
-- [ ] Estados del pedido: borrador → confirmado → cancelado (dominio hecho; confirmación conectada en `OrdersService`; falta cancelar)
+- [X] Estados del pedido: borrador → confirmado → cancelado (dominio, confirmación y cancelación con reposición de stock en `OrdersService`)
 - [X] Idempotency key en la confirmación del pedido (ADR 0004; carreras cubiertas con `FOR UPDATE` e índice único, ADR 0005)
-- [ ] Autenticación simple con JWT; cada pedido pertenece a un usuario
+- [X] Autenticación simple con JWT; cada pedido pertenece a un usuario (ADR 0008)
 - [X] Tests unitarios de la lógica de pedidos (dominio y `OrdersService.confirm` con falsos en memoria)
 
 **Próximos pasos (en orden)**
@@ -65,7 +65,7 @@ Estas decisiones cuestan poco ahora y mucho después.
 1. ✅ `OrdersService` + puertos `OrderRepository` y `TransactionManager`: confirmar un pedido toca pedidos y stock en una sola transacción. Tests unitarios con falsos en memoria.
 2. ✅ Adaptador Drizzle de pedidos + idempotencia. Tests de integración con carreras reales: misma idempotency key dos veces y dos confirmaciones del mismo pedido en paralelo.
 3. ✅ Endpoints de `orders` y traducción de errores de dominio a HTTP (`OrderRuleError` e `InsufficientStockError` → 409, `OrderNotFoundError` → 404, `IdempotencyKeyReuseError` → 422). Antes, sumar al service crear borrador, agregar línea y cancelar (cancelar repone stock).
-4. JWT: tabla `users`, login, guard y migración con la FK de `orders.user_id`.
+4. ✅ JWT: tabla `users`, login, guard y migración con la FK de `orders.user_id`.
 
 Decisiones registradas en `docs/adr/`. Entrega: un PR al terminar el paso 2 (núcleo de pedidos) y otro con los pasos 3 y 4. Rama de trabajo: `feat/fase-1-dominio`.
 

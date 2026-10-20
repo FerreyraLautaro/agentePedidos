@@ -57,7 +57,7 @@ describe('OrdersService.confirm (integration)', () => {
   it('rolls back the whole confirmation when stock is insufficient', async () => {
     await db.update(stock).set({ quantity: 1 }).where(eq(stock.productId, yerbaId));
 
-    await expect(service.confirm(orderId, 'key-1')).rejects.toBeInstanceOf(InsufficientStockError);
+    await expect(service.confirm(userId, orderId, 'key-1')).rejects.toBeInstanceOf(InsufficientStockError);
 
     expect(await orders.findById(orderId)).toMatchObject({ status: 'draft', idempotencyKey: null });
     expect(await yerbaStock()).toBe(1);
@@ -65,8 +65,8 @@ describe('OrdersService.confirm (integration)', () => {
 
   it('confirms only once when two different keys race for the same order', async () => {
     const results = await Promise.allSettled([
-      service.confirm(orderId, 'key-1'),
-      service.confirm(orderId, 'key-2'),
+      service.confirm(userId, orderId, 'key-1'),
+      service.confirm(userId, orderId, 'key-2'),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -77,8 +77,8 @@ describe('OrdersService.confirm (integration)', () => {
 
   it('treats two parallel requests with the same key as one confirmation', async () => {
     const [first, second] = await Promise.all([
-      service.confirm(orderId, 'key-1'),
-      service.confirm(orderId, 'key-1'),
+      service.confirm(userId, orderId, 'key-1'),
+      service.confirm(userId, orderId, 'key-1'),
     ]);
 
     expect(first).toEqual(second);
@@ -97,8 +97,8 @@ describe('OrdersService.confirm (integration)', () => {
     });
 
     const results = await Promise.allSettled([
-      service.confirm(orderId, 'key-1'),
-      service.confirm(otherId, 'key-1'),
+      service.confirm(userId, orderId, 'key-1'),
+      service.confirm(userId, otherId, 'key-1'),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -108,17 +108,17 @@ describe('OrdersService.confirm (integration)', () => {
   });
 
   it('gives the stock back when a confirmed order is cancelled', async () => {
-    await service.confirm(orderId, 'key-1');
+    await service.confirm(userId, orderId, 'key-1');
     expect(await yerbaStock()).toBe(8);
 
-    await service.cancel(orderId);
+    await service.cancel(userId, orderId);
 
     expect(await orders.findById(orderId)).toMatchObject({ status: 'cancelled' });
     expect(await yerbaStock()).toBe(10);
   });
 
   it('ends cancelled with stock intact when confirm and cancel race on the same draft', async () => {
-    await Promise.allSettled([service.confirm(orderId, 'key-1'), service.cancel(orderId)]);
+    await Promise.allSettled([service.confirm(userId, orderId, 'key-1'), service.cancel(userId, orderId)]);
 
     // Whichever transaction wins the row lock, the other sees its result: the stock never leaks.
     expect(await orders.findById(orderId)).toMatchObject({ status: 'cancelled' });
@@ -126,7 +126,7 @@ describe('OrdersService.confirm (integration)', () => {
   });
 
   it('prices a new line from the database and loses no update when two lines are added in parallel', async () => {
-    await Promise.all([service.addLine(orderId, yerbaId, 1), service.addLine(orderId, yerbaId, 1)]);
+    await Promise.all([service.addLine(userId, orderId, yerbaId, 1), service.addLine(userId, orderId, yerbaId, 1)]);
 
     expect((await orders.findById(orderId))?.lines).toEqual([
       { productId: yerbaId, quantity: 4, unitPriceCents: 150 },
