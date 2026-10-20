@@ -1,5 +1,6 @@
 import type { ArgumentsHost } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
+import { EmailAlreadyRegisteredError, InvalidCredentialsError } from '../auth/auth.errors.js';
 import {
   IdempotencyKeyReuseError,
   OrderNotFoundError,
@@ -26,6 +27,8 @@ describe('DomainExceptionFilter', () => {
     [new OrderNotFoundError('o1'), 404],
     [new ProductNotFoundError('p1'), 404],
     [new IdempotencyKeyReuseError('k1'), 422],
+    [new EmailAlreadyRegisteredError('ana@example.com'), 409],
+    [new InvalidCredentialsError(), 401],
   ])('maps %s to HTTP %i', (error, expectedStatus) => {
     const { status } = run(error);
 

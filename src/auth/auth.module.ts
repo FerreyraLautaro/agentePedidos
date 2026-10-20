@@ -4,11 +4,13 @@ import { JwtModule } from '@nestjs/jwt';
 import type { Env } from '../config/env.schema.js';
 import { Argon2PasswordHasher } from './adapters/argon2-password-hasher.js';
 import { DrizzleUserRepository } from './adapters/drizzle-user.repository.js';
+import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { PASSWORD_HASHER } from './password-hasher.port.js';
 import { USER_REPOSITORY } from './user-repository.port.js';
 
 @Module({
+  controllers: [AuthController],
   imports: [
     JwtModule.registerAsync({
       inject: [ConfigService],

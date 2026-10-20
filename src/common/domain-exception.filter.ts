@@ -1,5 +1,6 @@
 import { type ArgumentsHost, Catch, type ExceptionFilter, HttpStatus } from '@nestjs/common';
 import type { Response } from 'express';
+import { EmailAlreadyRegisteredError, InvalidCredentialsError } from '../auth/auth.errors.js';
 import {
   IdempotencyKeyReuseError,
   OrderNotFoundError,
@@ -13,7 +14,9 @@ type DomainError =
   | InsufficientStockError
   | OrderNotFoundError
   | ProductNotFoundError
-  | IdempotencyKeyReuseError;
+  | IdempotencyKeyReuseError
+  | EmailAlreadyRegisteredError
+  | InvalidCredentialsError;
 
 // The domain says what went wrong; this is the only place that decides which HTTP status it deserves.
 const STATUS_BY_ERROR: ReadonlyArray<readonly [new (...args: never[]) => DomainError, HttpStatus]> = [
@@ -22,6 +25,8 @@ const STATUS_BY_ERROR: ReadonlyArray<readonly [new (...args: never[]) => DomainE
   [OrderNotFoundError, HttpStatus.NOT_FOUND],
   [ProductNotFoundError, HttpStatus.NOT_FOUND],
   [IdempotencyKeyReuseError, HttpStatus.UNPROCESSABLE_ENTITY],
+  [EmailAlreadyRegisteredError, HttpStatus.CONFLICT],
+  [InvalidCredentialsError, HttpStatus.UNAUTHORIZED],
 ];
 
 @Catch(...STATUS_BY_ERROR.map(([type]) => type))
