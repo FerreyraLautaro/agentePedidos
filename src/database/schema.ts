@@ -30,13 +30,23 @@ export const stock = pgTable(
   (table) => [check('stock_quantity_non_negative', sql`${table.quantity} >= 0`)],
 );
 
+export const users = pgTable('users', {
+  id: uuid().primaryKey().defaultRandom(),
+  // Stored lowercase: the service normalizes it, the unique constraint is the last guard.
+  email: text().notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const orderStatus = pgEnum('order_status', ['draft', 'confirmed', 'cancelled']);
 
 export const orders = pgTable(
   'orders',
   {
     id: uuid().primaryKey().defaultRandom(),
-    userId: uuid('user_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
     status: orderStatus().notNull().default('draft'),
     idempotencyKey: text('idempotency_key'),
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
@@ -73,3 +83,4 @@ export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type OrderStatus = (typeof orderStatus.enumValues)[number];
 export type Product = typeof products.$inferSelect;
+export type User = typeof users.$inferSelect;

@@ -1,6 +1,6 @@
 # Laboratorio: agente de pedidos en NestJS
 
-Oct 13, 2026 · @Lautaro · Actualizado: Oct 14, 2026
+Oct 13, 2026 · @Lautaro · Actualizado: Oct 20, 2026
 
 ## Enfoque
 
@@ -18,7 +18,7 @@ Estas decisiones cuestan poco ahora y mucho después.
 
 - [ ] **Interfaces, no implementaciones:** `LlmProvider` para el modelo (hecho, con adaptadores de Anthropic y Gemini) y `ConversationStore` para el historial. Al principio, implementación en memoria; en la fase 3 se cambia por Redis sin tocar el agente.
 - [ ] **Las tools llaman a los services del dominio, no a la base de datos:** `addToOrder` usa `OrdersService`. La lógica de negocio vive en un solo lugar y las tools son un adaptador delgado.
-- [ ] **`userId` en los pedidos desde el inicio**, aunque esté hardcodeado. Agregar auth después es solo poner un guard.
+- [X] **`userId` en los pedidos desde el inicio**, aunque esté hardcodeado. Agregar auth después es solo poner un guard. (Hecho: el `userId` sale del JWT y todas las operaciones de `OrdersService` lo reciben; ADR 0008.)
 - [ ] **El loop del agente emite eventos** (`token`, `tool_call`, `tool_result`, `final`) con un async generator. `POST /chat` los junta y responde al final; en la fase 6 el endpoint SSE consume el mismo generador. Es la decisión que más trabajo ahorra.
 - [ ] **Campo `state` en la conversación**, aunque al principio siempre valga lo mismo. La fase 3 pasa a ser agregar transiciones, no rediseñar.
 - [ ] **Tracing envolviendo el `LlmProvider` y la ejecución de tools**, no disperso por el código. Cualquier tool o proveedor nuevo queda trazado automáticamente.
@@ -46,28 +46,60 @@ Estas decisiones cuestan poco ahora y mucho después.
 
 **Para poder explicar:** por qué abstraer el proveedor desde el día 1 (cambiar de modelo, fallback, tests con mocks) y para qué sirve el `providerState` opaco.
 
-## Fase 1: backend de dominio sin IA (en curso)
+## Fase 1: backend de dominio sin IA ✅ (PR #3 abierto, pendiente de merge)
 
 **Investigar:** diseño de contratos de API, validación con Zod o class-validator, idempotency keys.
 
-- [ ] Módulos `products`, `stock` y `orders` con endpoints REST
+- [X] Módulos `products`, `stock` y `orders` con endpoints REST
   - [X] `products`: `GET /products` (filtros, búsqueda, paginación) y `GET /products/:id`
   - [X] `stock`: puerto `StockRepository` con decremento atómico todo o nada (sin endpoints todavía)
-  - [ ] `orders`: endpoints
+  - [X] `orders`: endpoints (ADR 0006 y 0007)
 - [X] Seed de un catálogo realista (50–200 productos con descripción, categoría, precio y stock)
-- [ ] Estados del pedido: borrador → confirmado → cancelado (dominio hecho; confirmación conectada en `OrdersService`; falta cancelar)
+- [X] Estados del pedido: borrador → confirmado → cancelado (dominio, confirmación y cancelación con reposición de stock en `OrdersService`)
 - [X] Idempotency key en la confirmación del pedido (ADR 0004; carreras cubiertas con `FOR UPDATE` e índice único, ADR 0005)
-- [ ] Autenticación simple con JWT; cada pedido pertenece a un usuario
-- [X] Tests unitarios de la lógica de pedidos (dominio y `OrdersService.confirm` con falsos en memoria)
+- [X] Autenticación simple con JWT; cada pedido pertenece a un usuario (ADR 0008)
+- [X] Tests unitarios de la lógica de pedidos (dominio y `OrdersService` completo con falsos en memoria), de integración con carreras reales contra Postgres y e2e del borde HTTP
 
 **Próximos pasos (en orden)**
 
 1. ✅ `OrdersService` + puertos `OrderRepository` y `TransactionManager`: confirmar un pedido toca pedidos y stock en una sola transacción. Tests unitarios con falsos en memoria.
 2. ✅ Adaptador Drizzle de pedidos + idempotencia. Tests de integración con carreras reales: misma idempotency key dos veces y dos confirmaciones del mismo pedido en paralelo.
-3. Endpoints de `orders` y traducción de errores de dominio a HTTP (`OrderRuleError` e `InsufficientStockError` → 409, `OrderNotFoundError` → 404, `IdempotencyKeyReuseError` → 422). Antes, sumar al service crear borrador, agregar línea y cancelar (cancelar repone stock).
-4. JWT: tabla `users`, login, guard y migración con la FK de `orders.user_id`.
+3. ✅ Endpoints de `orders` y traducción de errores de dominio a HTTP (`OrderRuleError` e `InsufficientStockError` → 409, `OrderNotFoundError` → 404, `IdempotencyKeyReuseError` → 422). Antes, sumar al service crear borrador, agregar línea y cancelar (cancelar repone stock).
+4. ✅ JWT: tabla `users`, login, guard y migración con la FK de `orders.user_id`.
 
-Decisiones registradas en `docs/adr/`. Entrega: un PR al terminar el paso 2 (núcleo de pedidos) y otro con los pasos 3 y 4. Rama de trabajo: `feat/fase-1-dominio`.
+Decisiones registradas en `docs/adr/`. Entrega: un PR al terminar el paso 2 (núcleo de pedidos, #2, mergeado) y otro con los pasos 3 y 4 (#3, abierto). Rama de trabajo: `feat/fase-1-dominio`.
+
+**Registro de la sesión del 20 de octubre (pasos 3 y 4)**
+
+Qué se construyó, en 8 commits sobre `feat/fase-1-dominio`:
+
+- `OrdersService`: `createDraft`, `addLine`, `getById` y `cancel` (repone stock solo si el pedido estaba confirmado). Todas las operaciones reciben el `userId`.
+- Puerto `ProductCatalog`: el precio de la línea se lee del catálogo en el servidor y se congela como snapshot; el cliente y el agente solo mandan `productId` y cantidad (ADR 0006).
+- Endpoints: `POST /orders`, `GET /orders/:id`, `POST /orders/:id/lines`, `POST /orders/:id/confirm` (exige header `Idempotency-Key`) y `POST /orders/:id/cancel`.
+- `DomainExceptionFilter` global: `OrderRuleError`, `InsufficientStockError` y `EmailAlreadyRegisteredError` → 409; `OrderNotFoundError` y `ProductNotFoundError` → 404; `IdempotencyKeyReuseError` → 422; `InvalidCredentialsError` → 401 (ADR 0007).
+- Auth: tabla `users`, FK `orders.user_id → users.id` (migración `0003`), `POST /auth/register` y `/auth/login`, `JwtAuthGuard` y `@CurrentUserId()`. Un pedido ajeno responde 404, no 403 (ADR 0008).
+- Hashing con argon2id detrás del puerto `PasswordHasher`. **Plan B acordado: si `argon2` da problemas en Windows, cambiar a bcrypt** escribiendo otro adapter y tocando una línea de `auth.module.ts`. En esta máquina funcionó sin problemas.
+
+Verificado al cerrar: `tsc` y `oxlint` limpios, 76 tests unitarios, 27 de integración y 31 e2e en verde.
+
+Para poder explicar (surgió en esta sesión):
+
+- **Precio del lado del servidor:** el backend es la fuente de verdad del precio; con un LLM en el medio, cualquier dato que decida el cliente puede ser alucinado.
+- **Errores de dominio vs. HTTP:** el dominio lanza errores con significado de negocio y el borde decide el status. Las tools del agente (Fase 2) reutilizan los services y traducen los mismos errores a mensajes para el LLM.
+- **Carreras con lock de fila:** confirm vs. cancel sobre el mismo borrador siempre termina cancelado y con el stock intacto; dos `addLine` en paralelo no pierden ninguna escritura.
+- **No enumerar usuarios:** email inexistente y password incorrecta dan el mismo 401, y con email inexistente igual se verifica contra un hash descartable para igualar la latencia.
+- **Largo máximo de password (128):** evita que hashear entradas enormes sea una forma barata de consumir CPU.
+- **Bug que atrapó el e2e:** `@Headers()` ignora los pipes en esta versión de Nest, así que la validación del `Idempotency-Key` nunca corría; se resolvió con un decorador de parámetro propio.
+- **Migración con FK sobre datos existentes:** falla si hay filas huérfanas, por eso se revisa la migración y los datos antes de aplicarla.
+
+Decisiones tomadas por defecto que se pueden revertir: `ProductNotFoundError` responde 404 (podría ser 422 porque el producto viaja en el body); solo access token, sin refresh token ni revocación (un token robado sirve hasta que vence, 1h por defecto).
+
+**Para retomar en la próxima sesión**
+
+1. Revisar y mergear el PR #3. Antes, confirmar en "Files changed" que `.env.example` solo tiene placeholders y que el `.env` local tiene `JWT_SECRET` (mínimo 32 caracteres) y `JWT_EXPIRES_IN=1h` (o sin la línea: vacía hace fallar el arranque).
+2. Después del merge, volver a `master`, hacer pull y crear la rama de la Fase 2.
+3. Arrancar la Fase 2 (loop de agente a mano). Decisión pendiente para empezar: qué contrato tienen las tools y cómo se traducen los errores de dominio a mensajes para el LLM.
+4. Sin interfaz visual por ahora: `POST /chat` se prueba con un archivo `.http` o `curl`; el cliente web mínimo queda para la Fase 6.
 
 **Para poder explicar:** estos endpoints son las futuras tools del agente. El agente no tiene lógica de negocio propia: el backend valida y ejecuta.
 

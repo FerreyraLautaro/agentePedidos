@@ -27,6 +27,13 @@ export class OrderNotFoundError extends Error {
   }
 }
 
+export class ProductNotFoundError extends Error {
+  constructor(readonly productId: string) {
+    super(`Product ${productId} not found`);
+    this.name = 'ProductNotFoundError';
+  }
+}
+
 export class IdempotencyKeyReuseError extends Error {
   constructor(readonly idempotencyKey: string) {
     super(`Idempotency key ${idempotencyKey} was already used for another order`);

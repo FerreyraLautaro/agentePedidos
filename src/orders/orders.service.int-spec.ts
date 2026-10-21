@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { insertUser } from '../../test/integration/fixtures.js';
 import { createTestDatabase } from '../../test/integration/test-database.js';
 import type { Database } from '../database/database.tokens.js';
 import { products, stock } from '../database/schema.js';
 import { InsufficientStockError } from '../stock/stock.errors.js';
 import { DrizzleOrderRepository } from './adapters/drizzle-order.repository.js';
+import { DrizzleProductCatalog } from './adapters/drizzle-product-catalog.js';
 import { DrizzleTransactionManager } from './adapters/drizzle-transaction-manager.js';
 import { IdempotencyKeyReuseError, OrderRuleError } from './domain/order.js';
 import { OrdersService } from './orders.service.js';
@@ -27,14 +29,15 @@ describe('OrdersService.confirm (integration)', () => {
 
   beforeAll(() => {
     ({ pool, db } = createTestDatabase());
-    service = new OrdersService(new DrizzleTransactionManager(db));
+    service = new OrdersService(new DrizzleTransactionManager(db), new DrizzleProductCatalog(db));
     orders = new DrizzleOrderRepository(db);
   });
 
   afterAll(() => pool.end());
 
   beforeEach(async () => {
-    await db.execute(sql`TRUNCATE TABLE orders, products CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE orders, products, users CASCADE`);
+    await insertUser(db, userId);
     const [yerba] = await db
       .insert(products)
       .values({ sku: 'DES-001', name: 'Yerba', description: 'x', category: 'x', priceCents: 150 })
@@ -54,7 +57,7 @@ describe('OrdersService.confirm (integration)', () => {
   it('rolls back the whole confirmation when stock is insufficient', async () => {
     await db.update(stock).set({ quantity: 1 }).where(eq(stock.productId, yerbaId));
 
-    await expect(service.confirm(orderId, 'key-1')).rejects.toBeInstanceOf(InsufficientStockError);
+    await expect(service.confirm(userId, orderId, 'key-1')).rejects.toBeInstanceOf(InsufficientStockError);
 
     expect(await orders.findById(orderId)).toMatchObject({ status: 'draft', idempotencyKey: null });
     expect(await yerbaStock()).toBe(1);
@@ -62,8 +65,8 @@ describe('OrdersService.confirm (integration)', () => {
 
   it('confirms only once when two different keys race for the same order', async () => {
     const results = await Promise.allSettled([
-      service.confirm(orderId, 'key-1'),
-      service.confirm(orderId, 'key-2'),
+      service.confirm(userId, orderId, 'key-1'),
+      service.confirm(userId, orderId, 'key-2'),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -74,8 +77,8 @@ describe('OrdersService.confirm (integration)', () => {
 
   it('treats two parallel requests with the same key as one confirmation', async () => {
     const [first, second] = await Promise.all([
-      service.confirm(orderId, 'key-1'),
-      service.confirm(orderId, 'key-1'),
+      service.confirm(userId, orderId, 'key-1'),
+      service.confirm(userId, orderId, 'key-1'),
     ]);
 
     expect(first).toEqual(second);
@@ -94,13 +97,39 @@ describe('OrdersService.confirm (integration)', () => {
     });
 
     const results = await Promise.allSettled([
-      service.confirm(orderId, 'key-1'),
-      service.confirm(otherId, 'key-1'),
+      service.confirm(userId, orderId, 'key-1'),
+      service.confirm(userId, otherId, 'key-1'),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const [rejected] = results.filter((r) => r.status === 'rejected');
     expect(rejected.reason).toBeInstanceOf(IdempotencyKeyReuseError);
     expect(await yerbaStock()).toBe(8);
+  });
+
+  it('gives the stock back when a confirmed order is cancelled', async () => {
+    await service.confirm(userId, orderId, 'key-1');
+    expect(await yerbaStock()).toBe(8);
+
+    await service.cancel(userId, orderId);
+
+    expect(await orders.findById(orderId)).toMatchObject({ status: 'cancelled' });
+    expect(await yerbaStock()).toBe(10);
+  });
+
+  it('ends cancelled with stock intact when confirm and cancel race on the same draft', async () => {
+    await Promise.allSettled([service.confirm(userId, orderId, 'key-1'), service.cancel(userId, orderId)]);
+
+    // Whichever transaction wins the row lock, the other sees its result: the stock never leaks.
+    expect(await orders.findById(orderId)).toMatchObject({ status: 'cancelled' });
+    expect(await yerbaStock()).toBe(10);
+  });
+
+  it('prices a new line from the database and loses no update when two lines are added in parallel', async () => {
+    await Promise.all([service.addLine(userId, orderId, yerbaId, 1), service.addLine(userId, orderId, yerbaId, 1)]);
+
+    expect((await orders.findById(orderId))?.lines).toEqual([
+      { productId: yerbaId, quantity: 4, unitPriceCents: 150 },
+    ]);
   });
 });

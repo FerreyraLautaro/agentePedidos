@@ -1,36 +1,36 @@
-# ADR 0001: Ports and adapters for external dependencies
+# ADR 0001: Ports and adapters para las dependencias externas
 
-- Status: Accepted
-- Date: 2026-10-15 (recorded retroactively; decided in phase 0)
+- Estado: Aceptado
+- Fecha: 2026-10-15 (registrado a posteriori; decidido en la fase 0)
 
-## Context
+## Contexto
 
-The agent depends on an LLM vendor, and the thesis compares several providers (phase 9). Business logic also needs persistence. If services call vendor SDKs or the database directly, swapping a provider or testing the logic without network and database becomes expensive.
+El agente depende de un provider de LLM, y la tesis compara varios providers (fase 9). La lógica de negocio también necesita persistencia. Si los services llaman directamente a los SDKs de los providers o a la base de datos, cambiar de provider o testear la lógica sin red ni base de datos se vuelve caro.
 
-## Decision
+## Decisión
 
-Domain-facing contracts are TypeScript interfaces in `*.port.ts` files, each paired with a `Symbol` injection token, because interfaces do not exist at runtime and Nest injects by token. Adapters in an `adapters/` folder implement the port and translate in both directions between the port's types and the vendor SDK.
+Los contratos que ve el domain son interfaces de TypeScript en archivos `*.port.ts`, cada una acompañada de un injection token `Symbol`, porque las interfaces no existen en runtime y Nest inyecta por token. Los adapters, en una carpeta `adapters/`, implementan el port y traducen en ambos sentidos entre los tipos del port y el SDK del provider.
 
-- The port never exposes SDK types.
-- The module's `useFactory` is the only place that knows which adapter is used.
-- Consumers inject with `@Inject(TOKEN)` and import the interface with `import type`.
+- El port nunca expone tipos del SDK.
+- El `useFactory` del módulo es el único lugar que sabe qué adapter se usa.
+- Los consumers inyectan con `@Inject(TOKEN)` e importan la interfaz con `import type`.
 
-For the LLM, `LlmProvider` exposes `chat()` and `stream()`, with tool calls, a normalized `stopReason` (`end | tool_use | max_tokens | refusal`) and token usage. Adapters exist for Anthropic and Gemini. Three invariants hold for every adapter:
+Para el LLM, `LlmProvider` expone `chat()` y `stream()`, con tool calls, un `stopReason` normalizado (`end | tool_use | max_tokens | refusal`) y token usage. Hay adapters para Anthropic y Gemini. Tres invariantes valen para todo adapter:
 
-1. `providerState` is opaque: the adapter stores the raw assistant content and replays it verbatim. This preserves Anthropic thinking blocks and Gemini thought signatures across tool-use turns.
-2. Consecutive `tool` messages are merged into a single user turn (parallel tool results).
-3. Unknown stop or finish reasons throw instead of being guessed.
+1. `providerState` es opaco: el adapter guarda el contenido crudo del assistant y lo reenvía tal cual (replay). Así se preservan los thinking blocks de Anthropic y las thought signatures de Gemini entre turnos con tools.
+2. Los mensajes `tool` consecutivos se fusionan (merge) en un único turno de usuario (parallel tool results).
+3. Los stop o finish reasons desconocidos lanzan un error (throw) en vez de adivinarse.
 
-Ports are introduced only where there is logic to isolate. The read-only `products` catalog injects Drizzle directly and is covered by integration tests.
+Los ports se introducen solo donde hay lógica que aislar. El catálogo `products`, de solo lectura, inyecta Drizzle directamente y se cubre con integration tests.
 
-## Alternatives considered
+## Alternativas consideradas
 
-- **Call SDKs directly from services.** Less code, but it couples the agent loop to one vendor and makes provider comparison a rewrite.
-- **A framework abstraction (LangChain, Vercel AI SDK).** Faster to start, but it hides the provider differences the thesis needs to study, such as thought signatures and stop reasons.
-- **Ports everywhere, including the catalog.** Uniform, but it adds indirection with nothing to isolate.
+- **Llamar a los SDKs directamente desde los services.** Menos código, pero acopla el loop del agente a un solo provider y convierte la comparación de providers en una reescritura.
+- **Una abstracción de framework (LangChain, Vercel AI SDK).** Más rápida para empezar, pero oculta las diferencias entre providers que la tesis necesita estudiar, como las thought signatures y los stop reasons.
+- **Ports en todas partes, incluido el catálogo.** Es uniforme, pero agrega indirección sin nada que aislar.
 
-## Consequences
+## Consecuencias
 
-- Adding a provider means a new adapter, an entry in the `LLM_PROVIDER` enum and its API key in `API_KEY_BY_PROVIDER`. The agent does not change.
-- Adapters are tested with the SDK client injected through the constructor and replaced by a fake, so tests never hit the network.
-- The normalized contract can hide vendor-specific features. Anything that does not fit travels in `providerState` or requires extending the port.
+- Agregar un provider implica un nuevo adapter, una entrada en el enum `LLM_PROVIDER` y su API key en `API_KEY_BY_PROVIDER`. El agente no cambia.
+- Los adapters se testean con el cliente del SDK inyectado por constructor y reemplazado por un fake, así que los tests nunca tocan la red.
+- El contrato normalizado puede ocultar features propias de un provider. Lo que no encaje viaja en `providerState` o exige extender el port.

@@ -1,32 +1,32 @@
-# ADR 0002: Atomic, all-or-nothing stock decrement
+# ADR 0002: Stock decrement atómico, todo o nada
 
-- Status: Accepted
-- Date: 2026-10-15 (recorded retroactively; decided in phase 1)
+- Estado: Aceptado
+- Fecha: 2026-10-15 (registrado a posteriori; decidido en la fase 1)
 
-## Context
+## Contexto
 
-Stock is decremented when an order is confirmed. Two customers can confirm orders for the last unit at the same time, and an order can contain several products. The store must never oversell, and an order must never be partially fulfilled.
+El stock se descuenta cuando se confirma un pedido. Dos clientes pueden confirmar pedidos por la última unidad al mismo tiempo, y un pedido puede tener varios productos. El negocio nunca debe vender de más (oversell), y un pedido nunca debe cumplirse a medias.
 
-## Decision
+## Decisión
 
-`StockRepository.decrement(lines)` is all or nothing:
+`StockRepository.decrement(lines)` es todo o nada (all or nothing):
 
-- It runs in one transaction.
-- Each line uses a conditional update, `UPDATE stock SET quantity = quantity - n WHERE product_id = $1 AND quantity >= n`. A line that updates zero rows lacks stock.
-- Duplicate lines for the same product are merged before checking, so two lines of 1 are checked as 2.
-- Lines are sorted by product id, so concurrent transactions lock rows in the same order and cannot deadlock.
-- If any product lacks stock, the transaction rolls back and `InsufficientStockError` lists every failing product, not only the first.
-- A `CHECK (quantity >= 0)` constraint in the database is the last line of defense.
+- Corre en una sola transacción.
+- Cada línea usa un conditional update, `UPDATE stock SET quantity = quantity - n WHERE product_id = $1 AND quantity >= n`. Una línea que actualiza cero filas no tiene stock suficiente.
+- Las líneas duplicadas del mismo producto se fusionan (merge) antes de verificar, de modo que dos líneas de 1 se verifican como 2.
+- Las líneas se ordenan por id de producto, así las transacciones concurrentes toman los locks de las filas en el mismo orden y no pueden generar un deadlock.
+- Si algún producto no tiene stock, la transacción hace rollback y `InsufficientStockError` lista todos los productos que fallan, no solo el primero.
+- Una constraint `CHECK (quantity >= 0)` en la base de datos es la última línea de defensa.
 
-## Alternatives considered
+## Alternativas consideradas
 
-- **Read, check in code, then write.** Two concurrent requests can both read 1 and both write 0: a lost update that oversells.
-- **`SELECT ... FOR UPDATE` then update.** Correct, but it needs an extra round trip per line for the same guarantee the conditional update gives in one statement.
-- **Optimistic locking with a version column.** Fits long edits, but on contention it forces retries for a hot product.
-- **Reserve stock when a line is added to the draft.** Abandoned drafts would hold stock and need expiry. It can be revisited if the agent needs reservations.
+- **Leer, verificar en código y luego escribir.** Dos requests concurrentes pueden leer 1 y escribir 0 las dos: un lost update que hace oversell.
+- **`SELECT ... FOR UPDATE` y luego update.** Es correcto, pero necesita un round trip extra por línea para la misma garantía que el conditional update da en una sola sentencia.
+- **Optimistic locking con una columna de versión.** Sirve para ediciones largas, pero ante contención obliga a hacer retry sobre un producto muy pedido.
+- **Reservar stock al agregar una línea al borrador.** Los borradores abandonados retendrían stock y habría que hacerlos expirar. Se puede retomar si el agente llega a necesitar reservas.
 
-## Consequences
+## Consecuencias
 
-- Correctness is proven with integration tests against real Postgres, including two concurrent decrements of the last unit where exactly one succeeds.
-- Listing every failing product lets the agent tell the customer everything that is missing in one turn.
-- The decrement must run inside the caller's transaction when other writes depend on it. See ADR 0003.
+- La corrección se demuestra con integration tests contra Postgres real, incluidos dos decrements concurrentes de la última unidad donde exactamente uno tiene éxito.
+- Listar todos los productos que fallan permite que el agente le diga al cliente todo lo que falta en un solo turno.
+- El decrement debe correr dentro de la transacción del caller cuando otras escrituras dependen de él. Ver ADR 0003.
